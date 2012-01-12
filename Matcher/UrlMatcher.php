@@ -12,6 +12,7 @@
 namespace Symfony\Component\Routing\Matcher;
 
 use Symfony\Component\Routing\Exception\MethodNotAllowedException;
+use Symfony\Component\Routing\Exception\HostnameNotAllowedException;
 use Symfony\Component\Routing\Exception\ResourceNotFoundException;
 use Symfony\Component\Routing\RouteCollection;
 use Symfony\Component\Routing\RequestContext;
@@ -74,14 +75,19 @@ class UrlMatcher implements UrlMatcherInterface
     public function match($pathinfo)
     {
         $this->allow = array();
+        $this->hosts = array();
 
         if ($ret = $this->matchCollection($pathinfo, $this->routes)) {
             return $ret;
         }
 
-        throw 0 < count($this->allow)
-            ? new MethodNotAllowedException(array_unique(array_map('strtoupper', $this->allow)))
-            : new ResourceNotFoundException();
+        if (0 < count($this->allow)) {
+            throw new MethodNotAllowedException(array_unique(array_map('strtoupper', $this->allow)));
+        }
+        if (0 < count($this->hosts)) {
+            throw new HostnameNotAllowedException(array_unique(array_map('strtolower', $this->hosts)));
+        }
+        throw new ResourceNotFoundException();
     }
 
     protected function matchCollection($pathinfo, RouteCollection $routes)
@@ -134,6 +140,16 @@ class UrlMatcher implements UrlMatcherInterface
 
                 if ($this->context->getScheme() !== $scheme) {
                     return $this->redirect($pathinfo, $name, $scheme);
+                }
+            }
+
+            // check hostname requirement
+            if ($req = $route->getRequirement('_host')) {
+                $host = $this->context->getHost();
+                if (!in_array($host, $req = explode('|', $req))) {
+                    $this->hosts = array_merge($this->hosts, $req);
+
+                    continue;
                 }
             }
 

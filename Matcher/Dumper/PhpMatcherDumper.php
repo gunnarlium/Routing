@@ -62,10 +62,13 @@ class PhpMatcherDumper extends MatcherDumper
     public function match(\$pathinfo)
     {
         \$allow = array();
+        \$hosts = array();
         \$pathinfo = urldecode(\$pathinfo);
 
 $code
-        throw 0 < count(\$allow) ? new MethodNotAllowedException(array_unique(\$allow)) : new ResourceNotFoundException();
+        throw 0 < count(\$allow) ? new MethodNotAllowedException(array_unique(\$allow)) :
+                0 < count(\$hosts) ? new HostnameNotAllowedException(array_unique(\$hosts)) :
+                new ResourceNotFoundException();
     }
 
 EOF;
@@ -149,6 +152,7 @@ EOF;
         $hasTrailingSlash = false;
         $matches = false;
         $methods = array();
+        $hostnames = array();
         if ($req = $route->getRequirement('_method')) {
             $methods = explode('|', strtoupper($req));
             // GET and HEAD are equivalent
@@ -156,6 +160,10 @@ EOF;
                 $methods[] = 'HEAD';
             }
         }
+        if ($req = $route->getRequirement('_host')) {
+            $hostnames = explode('|', strtolower($req));
+        }
+
         $supportsTrailingSlash = $supportsRedirections && (!$methods || in_array('HEAD', $methods));
 
         if (!count($compiledRoute->getVariables()) && false !== preg_match('#^(.)\^(?P<url>.*?)\$\1#', str_replace(array("\n", ' '), '', $compiledRoute->getRegex()), $m)) {
@@ -208,6 +216,25 @@ EOF;
             }
         }
 
+        if ($hostnames) {
+            if (1 === count($hostnames)) {
+                $code[] = <<<EOF
+            if (\$this->context->getHost() != '$hostnames[0]') {
+                \$hosts[] = '$hostnames[0]';
+                goto $gotoname;
+            }
+EOF;
+            } else {
+                $hostnames = implode('\', \'', $hostnames);
+                $code[] = <<<EOF
+            if (!in_array(\$this->context->getHost(), array('$hostnames'))) {
+                \$hosts = array_merge(\$hosts, array('$hostnames'));
+                goto $gotoname;
+            }
+EOF;
+            }
+        }
+
         if ($hasTrailingSlash) {
             $code[] = sprintf(<<<EOF
             if (substr(\$pathinfo, -1) !== '/') {
@@ -244,7 +271,7 @@ EOF
         }
         $code[] = "        }";
 
-        if ($methods) {
+        if ($methods || $hostnames) {
             $code[] = "        $gotoname:";
         }
 
@@ -259,6 +286,7 @@ EOF
 <?php
 
 use Symfony\Component\Routing\Exception\MethodNotAllowedException;
+use Symfony\Component\Routing\Exception\HostnameNotAllowedException;
 use Symfony\Component\Routing\Exception\ResourceNotFoundException;
 use Symfony\Component\Routing\RequestContext;
 
